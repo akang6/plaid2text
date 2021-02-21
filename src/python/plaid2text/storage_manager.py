@@ -100,13 +100,15 @@ class SQLiteStorage():
         c = self.conn.cursor()
         c.execute("""
             create table if not exists transactions
-                (account_id, transaction_id, created, updated, plaid_json, metadata)
+                (account, account_id, transaction_id, created, updated, plaid_json, metadata)
             """)
         c.execute("""
             create unique index if not exists transactions_idx
-                ON transactions(account_id, transaction_id)
+                ON transactions(account, account_id, transaction_id)
             """)
         self.conn.commit()
+
+        self.account = account
 
         # This might be needed if there's not consistent support for json_extract in sqlite3 installations
         # this will need to be modified to support the "$.prop" syntax
@@ -128,25 +130,26 @@ class SQLiteStorage():
             metadata = t.get('plaid2text', None)
             if metadata is not None:
                 metadata = json.dumps(metadata)
+            else:
+                metadata = "{\"pulled_to_file\": false}"
 
             c = self.conn.cursor()
             c.execute("""
                 insert into 
-                    transactions(account_id, transaction_id, created, updated, plaid_json, metadata)
-                    values(?,?,strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),?,?)
-                    on conflict(account_id, transaction_id) DO UPDATE
+                    transactions(account, account_id, transaction_id, created, updated, plaid_json, metadata)
+                    values(?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),?,?)
+                    on conflict(account, account_id, transaction_id) DO UPDATE
                         set updated = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-                            plaid_json = excluded.plaid_json,
-                            metadata   = excluded.metadata
-                """, [act_id, trans_id, json.dumps(t), metadata])
+                            plaid_json = excluded.plaid_json
+                """, [self.account, act_id, trans_id, json.dumps(t), metadata])
             self.conn.commit()
 
     def get_transactions(self, from_date=None, to_date=None, only_new=True):
-        query = "select plaid_json, metadata from transactions";
+        query = "select account, plaid_json, metadata from transactions";
 
         conditions = []
         if only_new: 
-            conditions.append("coalesce(json_extract(plaid_json, '$.pulled_to_file'), false) = false")
+            conditions.append("coalesce(json_extract(metadata, '$.pulled_to_file'), false) = false")
 
         params  = []
         if from_date and to_date and (from_date <= to_date):
@@ -166,30 +169,30 @@ class SQLiteStorage():
 
         ret = []
         for row in transactions:
-            t = json.loads(row[0])
-            if row[1]:
-                t['plaid2text'] = json.loads(row[1])
-            else:
-                t['plaid2text'] = {}
+            if row[0] == self.account:
+                t = json.loads(row[1])
+                if row[2]:
+                    t['plaid2text'] = json.loads(row[1])
+                else:
+                    t['plaid2text'] = {}
 
-            if ( len(t['plaid2text']) == 0 ):
-                # set empty objects ({}) to None to account for assumptions that None means not processed
-                t['plaid2text'] = None
+                if ( len(t['plaid2text']) == 0 ):
+                    # set empty objects ({}) to None to account for assumptions that None means not processed
+                    t['plaid2text'] = None
 
-            t['date'] = date_parser.parse( t['date'] )        
-
-            entry = Entry(t, {})
-            ret.append( entry )
+                t['date'] = date_parser.parse( t['date'] )        
+                
+                ret.append(t)
 
         return ret
 
-    def update_transaction(self, update, mark_pulled=None):
+    def update_transaction(self, update, mark_pulled=True):
         trans_id = update.pop('transaction_id')
         if mark_pulled:
             update['pulled_to_file'  ] = mark_pulled            
         update['date_last_pulled'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        update['archived'] = null
+        update['archived'] = None
 
         c = self.conn.cursor()
         c.execute("""

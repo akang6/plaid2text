@@ -466,7 +466,7 @@ def main():
 
     callback = None
     if options.no_mark_pulled:
-        callback = lambda dict: sm.update_transaction(dict, mark_pulled=False)
+        callback = lambda dict: sm.update_transaction(dict, mark_pulled=options.no_mark_pulled)
 
     try:
         update_dict = out.process_transactions(callback=callback)
