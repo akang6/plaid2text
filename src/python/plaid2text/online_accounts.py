@@ -64,3 +64,22 @@ class PlaidAccess():
         print("Downloaded %d transactions for %s - %s" % ( len(ret), start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")))
 
         return ret
+
+    def update_link(self,access_token):
+        configs = {
+            'user': {
+                'client_user_id': '123-test-user-id',
+            },
+            'client_name': "Plaid2Text",
+            'country_codes': ['US'],
+            'language': 'en',
+            'access_token': access_token
+        }
+        try:
+            response = self.client.LinkToken.create(configs)
+        except plaid_errors.ItemError as ex:
+            print("Unable to update link due to: ", file=sys.stderr)
+            print("    %s" % ex, file=sys.stderr )
+            sys.exit(1)
+
+        return response;
